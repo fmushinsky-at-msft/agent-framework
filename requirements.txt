@@ -1,0 +1,8 @@
+agent-framework>=1.2.2
+agent-framework-foundry-hosting
+azure-search-documents>=11.6.0
+fastapi>=0.111.0
+uvicorn>=0.30.0
+python-dotenv
+debugpy
+agent-dev-cli

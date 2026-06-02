@@ -1,0 +1,73 @@
+
+### Basic agent test
+POST http://localhost:8088/responses HTTP/1.1
+Content-Type: application/json
+
+{
+	"message": "Hello! What can you help me with?",
+	"agentid": "basic",
+	"conversation_id": "",
+	"parameters": {
+		"user_id": "JDOE",
+		"username": "John Doe"
+	}
+}
+
+
+### Workflow agent test
+POST http://localhost:8088/responses HTTP/1.1
+Content-Type: application/json
+
+{
+	"message": "Research Azure AI Foundry and give me a report on its capabilities",
+	"agentid": "workflow",
+	"conversation_id": "",
+	"parameters": {
+		"user_id": "JDOE",
+		"username": "John Doe"
+	}
+}
+
+### Orchestrator agent test
+POST http://localhost:8088/responses HTTP/1.1
+Content-Type: application/json
+
+{
+	"message": "who is my manager?",
+	"agentid": "orchestrator",
+	"conversation_id": "",
+	"parameters": {
+		"user_id": "JDOE",
+		"username": "John Doe"
+	}
+}
+
+### Orchestrator agent test with knowledge base retrieval
+POST http://localhost:8088/responses HTTP/1.1   
+Content-Type: application/json
+
+{
+	"message": "What are the Northwind plans available?",
+	"agentid": "orchestrator",
+	"conversation_id": "",
+	"parameters": {
+		"user_id": "JDOE",
+		"username": "John Doe"
+	}
+}
+
+### Follow-up turn in same conversation
+# 1) Run the previous request first.
+# 2) Copy response.conversation_id and paste below.
+POST http://localhost:8088/responses HTTP/1.1
+Content-Type: application/json
+
+{
+	"message": "compare them",
+	"agentid": "orchestrator",
+	"conversation_id": "resp_0023634737aec16f006a1ecc5b1ee48195aa2c40f725c3b9fc",
+	"parameters": {
+		"user_id": "JDOE",
+		"username": "John Doe"
+	}
+}

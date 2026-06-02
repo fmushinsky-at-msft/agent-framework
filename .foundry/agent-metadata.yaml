@@ -1,0 +1,11 @@
+## Foundry Deployment Metadata
+## This file tracks deployment configuration for the agent.
+## See: https://learn.microsoft.com/azure/ai-foundry/agents/concepts/hosted-agents
+
+defaultEnvironment: dev
+
+environments:
+  dev:
+    projectEndpoint: "<YOUR_FOUNDRY_PROJECT_ENDPOINT>"
+    agentName: "agent-framework-full-sample"
+    azureContainerRegistry: "<YOUR_ACR_NAME>"
