@@ -197,7 +197,7 @@ def hr_info_given_userid(
         }
     )
     url = f"{base_url}?{query}"
-    payload = json.dumps({"user_name": user_name}).encode("utf-8")
+    payload = json.dumps({"userid": user_name}).encode("utf-8")
     req = request.Request(
         url,
         data=payload,
