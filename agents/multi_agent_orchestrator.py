@@ -17,7 +17,17 @@ from azure.identity import DefaultAzureCredential
 from pydantic import Field
 
 from agents.prompt_templates import build_template_context, render_prompt_template
-from agents.tools import get_current_time, hr_info_given_userid, search_knowledge_base
+from agents.tools import (
+    get_current_time,
+    hr_info_given_userid,
+    search_ai_policy_knowledge_base,
+    search_commuter_knowledge_base,
+    search_data_classification_knowledge_base,
+    search_health_benefit_knowledge_base,
+    search_hr_policy_knowledge_base,
+    search_retirement_knowledge_base,
+    search_staff_profile_knowledge_base,
+)
 
 ORCHESTRATOR_INSTRUCTIONS = (
     "You are an assistant that determines the intent of the user question\n"
@@ -161,49 +171,49 @@ class MultiAgentOrchestrator:
                 client=self.client,
                 instructions=render_prompt_template(HEALTH_BENEFIT_INSTRUCTIONS, self.parameters),
                 name="health_benefit",
-                tools=[search_knowledge_base, get_current_time],
+                tools=[search_health_benefit_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
             "2": Agent(
                 client=self.client,
                 instructions=render_prompt_template(COMMUTER_INSTRUCTIONS, self.parameters),
                 name="commuter",
-                tools=[search_knowledge_base, get_current_time],
+                tools=[search_commuter_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
             "3": Agent(
                 client=self.client,
                 instructions=render_prompt_template(RETIREMENT_INSTRUCTIONS, self.parameters),
                 name="retirement",
-                tools=[search_knowledge_base, get_current_time],
+                tools=[search_retirement_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
             "4": Agent(
                 client=self.client,
                 instructions=render_prompt_template(HR_POLICY_INSTRUCTIONS, self.parameters),
                 name="hr_policy",
-                tools=[search_knowledge_base, get_current_time, hr_info_given_userid],
+                tools=[search_hr_policy_knowledge_base, get_current_time, hr_info_given_userid],
                 default_options={"store": False},
             ),
             "5": Agent(
                 client=self.client,
                 instructions=render_prompt_template(STAFF_PROFILE_INSTRUCTIONS, self.parameters),
                 name="staff_profile",
-                tools=[search_knowledge_base, get_current_time, hr_info_given_userid],
+                tools=[search_staff_profile_knowledge_base, get_current_time, hr_info_given_userid],
                 default_options={"store": False},
             ),
             "6": Agent(
                 client=self.client,
                 instructions=render_prompt_template(AI_POLICY_INSTRUCTIONS, self.parameters),
                 name="ai_policy",
-                tools=[search_knowledge_base, get_current_time],
+                tools=[search_ai_policy_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
             "7": Agent(
                 client=self.client,
                 instructions=render_prompt_template(DATA_CLASSIFICATION_INSTRUCTIONS, self.parameters),
                 name="data_classification",
-                tools=[search_knowledge_base, get_current_time],
+                tools=[search_data_classification_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
         }

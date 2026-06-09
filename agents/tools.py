@@ -118,6 +118,141 @@ def search_knowledge_base(
         return f"Azure AI Search query failed: {exc}"
 
 
+def _make_kb_search_tool(
+    tool_name: str,
+    tool_description: str,
+    endpoint_env_var: str,
+    index_env_var: str,
+    api_key_env_var: str = "",
+):
+    """Factory that creates a @tool-decorated search function bound to a specific index.
+
+    Args:
+        tool_name: Unique function name shown to the LLM (no spaces).
+        tool_description: Docstring / tool description shown to the LLM.
+        endpoint_env_var: Name of the env var holding the Azure Search endpoint URL.
+        index_env_var: Name of the env var holding the target index name.
+        api_key_env_var: Optional env var name for an API key; falls back to DefaultAzureCredential.
+    """
+
+    def _search(
+        query: Annotated[str, Field(description="The search query.")],
+        top: Annotated[int, Field(description="Maximum number of results to return.")] = 5,
+        filter_expression: Annotated[str, Field(description="Optional OData filter expression.")] = "",
+    ) -> str:
+        endpoint = os.environ.get(endpoint_env_var)
+        index_name = os.environ.get(index_env_var)
+        api_key = os.environ.get(api_key_env_var) if api_key_env_var else None
+
+        if not endpoint or not index_name:
+            return (
+                f"Knowledge base not configured. Set {endpoint_env_var} and "
+                f"{index_env_var} environment variables."
+            )
+
+        credential: Any = AzureKeyCredential(api_key) if api_key else DefaultAzureCredential()
+        client = SearchClient(endpoint=endpoint, index_name=index_name, credential=credential)
+
+        search_kwargs: dict[str, Any] = {"top": max(1, min(top, 20))}
+        if filter_expression:
+            search_kwargs["filter"] = filter_expression
+
+        try:
+            results = cast(Iterable[Mapping[str, Any]], client.search(search_text=query, **search_kwargs))
+            output_results: list[dict[str, Any]] = []
+            for item in results:
+                doc = item
+                snippet = str(
+                    doc.get("content")
+                    or doc.get("chunk")
+                    or doc.get("text")
+                    or doc.get("body")
+                    or doc.get("description")
+                    or ""
+                )
+                output_results.append(
+                    {
+                        "id": doc.get("id") or doc.get("key") or doc.get("chunk_id"),
+                        "title": doc.get("title") or doc.get("name"),
+                        "snippet": snippet,
+                        "relevance": doc.get("@search.score"),
+                    }
+                )
+            return json.dumps(
+                {"query": query, "index": index_name, "total_results": len(output_results), "results": output_results},
+                indent=2,
+            )
+        except Exception as exc:
+            return f"Azure AI Search query failed: {exc}"
+
+    _search.__name__ = tool_name
+    _search.__doc__ = tool_description
+    return tool(approval_mode="never_require")(_search)
+
+
+# ---------------------------------------------------------------------------
+# Specialized knowledge-base search tools
+# Each tool points to a distinct Azure AI Search index via its own env vars.
+# Add new tools by calling _make_kb_search_tool with the appropriate env var names.
+# ---------------------------------------------------------------------------
+
+search_health_benefit_knowledge_base = _make_kb_search_tool(
+    tool_name="search_health_benefit_knowledge_base",
+    tool_description="Search the health benefits knowledge base.",
+    endpoint_env_var="AZURE_SEARCH_ENDPOINT",
+    index_env_var="AZURE_SEARCH_HEALTH_BENEFIT_INDEX_NAME",
+    api_key_env_var="AZURE_SEARCH_API_KEY",
+)
+
+search_commuter_knowledge_base = _make_kb_search_tool(
+    tool_name="search_commuter_knowledge_base",
+    tool_description="Search the commuter benefits knowledge base.",
+    endpoint_env_var="AZURE_SEARCH_ENDPOINT",
+    index_env_var="AZURE_SEARCH_COMMUTER_INDEX_NAME",
+    api_key_env_var="AZURE_SEARCH_API_KEY",
+)
+
+search_retirement_knowledge_base = _make_kb_search_tool(
+    tool_name="search_retirement_knowledge_base",
+    tool_description="Search the retirement benefits knowledge base.",
+    endpoint_env_var="AZURE_SEARCH_ENDPOINT",
+    index_env_var="AZURE_SEARCH_RETIREMENT_INDEX_NAME",
+    api_key_env_var="AZURE_SEARCH_API_KEY",
+)
+
+search_hr_policy_knowledge_base = _make_kb_search_tool(
+    tool_name="search_hr_policy_knowledge_base",
+    tool_description="Search the HR policy knowledge base.",
+    endpoint_env_var="AZURE_SEARCH_ENDPOINT",
+    index_env_var="AZURE_SEARCH_HR_POLICY_INDEX_NAME",
+    api_key_env_var="AZURE_SEARCH_API_KEY",
+)
+
+search_staff_profile_knowledge_base = _make_kb_search_tool(
+    tool_name="search_staff_profile_knowledge_base",
+    tool_description="Search the staff profile and HR benefits knowledge base.",
+    endpoint_env_var="AZURE_SEARCH_ENDPOINT",
+    index_env_var="AZURE_SEARCH_STAFF_PROFILE_INDEX_NAME",
+    api_key_env_var="AZURE_SEARCH_API_KEY",
+)
+
+search_ai_policy_knowledge_base = _make_kb_search_tool(
+    tool_name="search_ai_policy_knowledge_base",
+    tool_description="Search the AI policy and governance knowledge base.",
+    endpoint_env_var="AZURE_SEARCH_ENDPOINT",
+    index_env_var="AZURE_SEARCH_AI_POLICY_INDEX_NAME",
+    api_key_env_var="AZURE_SEARCH_API_KEY",
+)
+
+search_data_classification_knowledge_base = _make_kb_search_tool(
+    tool_name="search_data_classification_knowledge_base",
+    tool_description="Search the data classification standards knowledge base.",
+    endpoint_env_var="AZURE_SEARCH_ENDPOINT",
+    index_env_var="AZURE_SEARCH_DATA_CLASSIFICATION_INDEX_NAME",
+    api_key_env_var="AZURE_SEARCH_API_KEY",
+)
+
+
 @tool(approval_mode="never_require")
 def get_current_time(
     timezone_name: Annotated[
