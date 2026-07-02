@@ -102,10 +102,8 @@ async def search_knowledge_base(
             )
             output_results.append(
                 {
-                    "id": doc.get("id") or doc.get("key") or doc.get("chunk_id"),
                     "title": doc.get("title") or doc.get("name"),
                     "snippet": snippet,
-                    "relevance": doc.get("@search.score"),
                 }
             )
 
@@ -182,10 +180,8 @@ def _make_kb_search_tool(
                 )
                 output_results.append(
                     {
-                        "id": doc.get("id") or doc.get("key") or doc.get("chunk_id"),
                         "title": doc.get("title") or doc.get("name"),
                         "snippet": snippet,
-                        "relevance": doc.get("@search.score"),
                     }
                 )
             return json.dumps(
