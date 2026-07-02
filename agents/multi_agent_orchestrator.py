@@ -8,6 +8,7 @@ This module is the primary and only implementation for intent-based routing:
 """
 
 import logging
+import os
 import re
 import time
 from typing import Annotated, Any, Mapping, Optional
@@ -23,15 +24,13 @@ from agents.prompt_templates import (
 )
 from agents.tools import (
     fetch_hr_profile,
-    get_current_time,
-    hr_info_given_userid,
-    search_ai_policy_knowledge_base,
-    search_commuter_knowledge_base,
-    search_data_classification_knowledge_base,
-    search_health_benefit_knowledge_base,
-    search_hr_policy_knowledge_base,
-    search_retirement_knowledge_base,
-    search_staff_profile_knowledge_base,
+    search_ai_policy_docs,
+    search_commuter_docs,
+    search_data_classification_docs,
+    search_health_benefit_docs,
+    search_hr_policy_docs,
+    search_retirement_docs,
+    search_staff_profile_docs,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,17 +63,9 @@ ORCHESTRATOR_INSTRUCTIONS = (
     "- Respond with '0'. Number Only."
 )
 
-USER_PROFILE_INSTRUCTIONS = (
-    "You are a User Profile and Benefits assistant. \n"
-    "Always run the User_Profile tool for every user questions\n"
-    "- Call the User_Profile tool with user_name: {user_id}\n"
-    "-ALWAYS RETURN FULL PROFILE INFORMATION\n"
-    "-DO NOT ANSWER THE QUESTION"
-)
-
 HEALTH_BENEFIT_INSTRUCTIONS = (
     "You are Health Benefits Assistant.\n"
-    "For HR Related content, such as details about different health plans, dental plans, and prescription plans. You have access to PDF documents that contain all plan details for users to ask for comparisons or general plan details. User profile information:{User profile context} \n"
+    "For HR Related content, such as details about different health plans, dental plans, and prescription plans. You have access to PDF documents that contain all plan details for users to ask for comparisons or general plan details. Use the user profile context provided with the request when relevant.\n"
     "# Rules when answering questions\n"
     "- Be brief in your answers.\n"
     "- DO NOT USE your own general knowledge to generate answers.\n"
@@ -96,7 +87,7 @@ COMMUTER_INSTRUCTIONS = (
 
 RETIREMENT_INSTRUCTIONS = (
     "For questions related Retirement Benefit such as Pension. Health Care Post Retirement, premium post retirement, dental post retirement. \n"
-    "User profile information:{Local.user_profile}\n"
+    "Use the user profile context provided with the request when relevant.\n"
     "# Rules when answering questions\n"
     "- Be brief in your answers.\n"
     "- DO NOT USE your own general knowledge to generate answers.\n"
@@ -106,7 +97,7 @@ RETIREMENT_INSTRUCTIONS = (
 )
 
 HR_POLICY_INSTRUCTIONS = (
-    "For questions related to HR policy, such as leave, ADA, remote work and employment policies. User profile information:{Local.user_profile}\n"
+    "For questions related to HR policy, such as leave, ADA, remote work and employment policies. Use the user profile context provided with the request when relevant.\n"
     "# Rules when answering questions\n"
     "- Be brief in your answers.\n"
     "- DO NOT USE your own general knowledge to generate answers.\n"
@@ -117,7 +108,7 @@ HR_POLICY_INSTRUCTIONS = (
 
 STAFF_PROFILE_INSTRUCTIONS = (
     "When users ask about HR benefits information (pay, vacation balance, health/dental/vision plans), and when users ask about HR profile information (employee id, supervisor/manager name, contact information, address, title, hire date, level/grade, job title)\n"
-    "Use the user Profile Information:{Local.user_profile}\n"
+    "Use the user profile context provided with the request.\n"
     "# Rules when answering questions\n"
     "- Be brief in your answers.\n"
     "- DO NOT USE your own general knowledge to generate answers.\n"
@@ -154,8 +145,17 @@ class MultiAgentOrchestrator:
         self.parameters = build_template_context(parameters)
         self.client = get_foundry_chat_client()
 
+        # Optionally run the lightweight intent classifier on a smaller/faster model
+        # deployment. Intent classification only returns a single digit (1-7), so a
+        # "mini"/"nano" model handles it in a fraction of the time. Falls back to the
+        # main model when AZURE_AI_CLASSIFIER_DEPLOYMENT_NAME is not set.
+        classifier_model = os.environ.get("AZURE_AI_CLASSIFIER_DEPLOYMENT_NAME")
+        classifier_client = (
+            get_foundry_chat_client(classifier_model) if classifier_model else self.client
+        )
+
         self.orchestrator = Agent(
-            client=self.client,
+            client=classifier_client,
             instructions=render_prompt_template(ORCHESTRATOR_INSTRUCTIONS, self.parameters),
             name="orchestrator",
             default_options={"store": False},
@@ -166,55 +166,62 @@ class MultiAgentOrchestrator:
                 client=self.client,
                 instructions=render_prompt_template(HEALTH_BENEFIT_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="health_benefit",
-                tools=[search_health_benefit_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
             "2": Agent(
                 client=self.client,
                 instructions=render_prompt_template(COMMUTER_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="commuter",
-                tools=[search_commuter_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
             "3": Agent(
                 client=self.client,
                 instructions=render_prompt_template(RETIREMENT_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="retirement",
-                tools=[search_retirement_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
             "4": Agent(
                 client=self.client,
                 instructions=render_prompt_template(HR_POLICY_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="hr_policy",
-                tools=[search_hr_policy_knowledge_base, get_current_time, hr_info_given_userid],
                 default_options={"store": False},
             ),
             "5": Agent(
                 client=self.client,
                 instructions=render_prompt_template(STAFF_PROFILE_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="staff_profile",
-                tools=[search_staff_profile_knowledge_base, get_current_time, hr_info_given_userid],
                 default_options={"store": False},
             ),
             "6": Agent(
                 client=self.client,
                 instructions=render_prompt_template(AI_POLICY_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="ai_policy",
-                tools=[search_ai_policy_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
             "7": Agent(
                 client=self.client,
                 instructions=render_prompt_template(DATA_CLASSIFICATION_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="data_classification",
-                tools=[search_data_classification_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
         }
 
+        # Deterministic retrieve-then-generate: the orchestrator runs the KB search
+        # itself and injects the results into the specialist prompt, so each
+        # specialist is a single grounded generation call with no extra tool-call
+        # round-trip.
+        self.searchers = {
+            "1": search_health_benefit_docs,
+            "2": search_commuter_docs,
+            "3": search_retirement_docs,
+            "4": search_hr_policy_docs,
+            "5": search_staff_profile_docs,
+            "6": search_ai_policy_docs,
+            "7": search_data_classification_docs,
+        }
+
     async def route(self, user_message: str) -> str:
-        """Run full orchestration: classify, branch, and answer.
+        """Run full orchestration: classify, retrieve, then answer.
 
         Per-hop wall-clock timings are logged at INFO so you can see exactly how
         many seconds each stage burns and compare the total against the upstream
@@ -227,7 +234,6 @@ class MultiAgentOrchestrator:
         classify_elapsed = time.perf_counter() - classify_start
 
         intent = self._extract_intent(str(intent_response))
-        specialist_input = user_message
 
         if not intent:
             logger.info(
@@ -237,52 +243,68 @@ class MultiAgentOrchestrator:
             )
             return "I am not able to answer your question. Please rephrase your question."
 
-        profile_elapsed = 0.0
-        if intent in {"1", "3", "4", "5"}:
-            # Fetch the user profile with a direct, deterministic HTTP call instead
-            # of spending a full extra LLM round-trip on an agent whose only job was
-            # to invoke this tool. Removing that hop cuts the orchestrator's tail
-            # latency, which is what intermittently exceeds the upstream (Copilot
-            # Studio / Power Automate / APIM) timeout and surfaces as
-            # FlowActionBadGateway.
-            user_id = str(self.parameters.get("user_id", "")).strip()
-            if user_id:
-                profile_start = time.perf_counter()
-                profile_response = await fetch_hr_profile(user_id)
-                profile_elapsed = time.perf_counter() - profile_start
-                specialist_input = (
-                    "User request:\n"
-                    f"{user_message}\n\n"
-                    "User profile context:\n"
-                    f"{profile_response}"
-                )
-
         specialist = self.specialists.get(intent)
         if specialist is None:
             logger.info(
-                "route timing | intent=%s | classify=%.2fs | profile=%.2fs | total=%.2fs",
+                "route timing | intent=%s | classify=%.2fs | total=%.2fs",
                 intent,
                 classify_elapsed,
-                profile_elapsed,
                 time.perf_counter() - turn_start,
             )
             return "I am not able to answer your question. Please rephrase your question."
 
-        specialist_start = time.perf_counter()
-        response = await specialist.run(specialist_input)
-        specialist_elapsed = time.perf_counter() - specialist_start
+        # Deterministic user-profile enrichment for profile-dependent intents.
+        profile_elapsed = 0.0
+        profile_context = ""
+        if intent in {"1", "3", "4", "5"}:
+            user_id = str(self.parameters.get("user_id", "")).strip()
+            if user_id:
+                profile_start = time.perf_counter()
+                profile_context = await fetch_hr_profile(user_id)
+                profile_elapsed = time.perf_counter() - profile_start
 
-        total_elapsed = time.perf_counter() - turn_start
+        # Deterministic knowledge-base retrieval (retrieve-then-generate): run the
+        # search ourselves and inject the results, instead of letting the specialist
+        # spend an extra LLM round-trip deciding to call a search tool.
+        search_elapsed = 0.0
+        search_context = ""
+        searcher = self.searchers.get(intent)
+        if searcher is not None:
+            search_start = time.perf_counter()
+            search_context = await searcher(user_message)
+            search_elapsed = time.perf_counter() - search_start
+
+        specialist_input = self._build_specialist_input(
+            user_message, profile_context, search_context
+        )
+
+        generate_start = time.perf_counter()
+        response = await specialist.run(specialist_input)
+        generate_elapsed = time.perf_counter() - generate_start
+
         logger.info(
-            "route timing | intent=%s (%s) | classify=%.2fs | profile=%.2fs | specialist=%.2fs | total=%.2fs",
+            "route timing | intent=%s (%s) | classify=%.2fs | profile=%.2fs | search=%.2fs | generate=%.2fs | total=%.2fs",
             intent,
             getattr(specialist, "name", "?"),
             classify_elapsed,
             profile_elapsed,
-            specialist_elapsed,
-            total_elapsed,
+            search_elapsed,
+            generate_elapsed,
+            time.perf_counter() - turn_start,
         )
         return str(response)
+
+    @staticmethod
+    def _build_specialist_input(
+        user_message: str, profile_context: str, search_context: str
+    ) -> str:
+        """Assemble the specialist prompt from the question and pre-fetched context."""
+        sections = [f"User request:\n{user_message}"]
+        if profile_context:
+            sections.append(f"User profile context:\n{profile_context}")
+        if search_context:
+            sections.append(f"Knowledge base search results:\n{search_context}")
+        return "\n\n".join(sections)
 
     @staticmethod
     def _extract_intent(response: str) -> Optional[str]:

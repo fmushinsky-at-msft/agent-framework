@@ -120,22 +120,29 @@ app = FastAPI(title="Agent Framework Custom Responses API", version="1.0.0")
 @app.post("/responses")
 async def create_response(request: CustomResponseRequest) -> dict[str, Any]:
     req_start = time.perf_counter()
-    agent = _create_agent_for_mode(request.agentid, request.parameters)
-    incoming_conversation_id = (request.conversation_id or "").strip() or None
-    session = (
-        agent.get_session(incoming_conversation_id)
-        if incoming_conversation_id
-        else agent.create_session()
-    )
 
-    # Force service-side storage so Foundry manages multi-turn conversation natively.
+    # Build the agent, open the session, and run it — all inside the handler so a
+    # failure during agent creation (e.g. missing configuration) surfaces as the
+    # same graceful JSON error as a failure during the run.
     try:
+        agent = _create_agent_for_mode(request.agentid, request.parameters)
+        incoming_conversation_id = (request.conversation_id or "").strip() or None
+        session = (
+            agent.get_session(incoming_conversation_id)
+            if incoming_conversation_id
+            else agent.create_session()
+        )
+
+        # Force service-side storage so Foundry manages multi-turn conversation natively.
         response: Any = await agent.run(
             request.message,
             stream=False,
             session=session,
             options={"store": True},
         )
+    except HTTPException:
+        # Preserve explicit HTTP errors (e.g. invalid agentid -> 400).
+        raise
     except Exception as exc:
         err_str = str(exc)
         logger.error(

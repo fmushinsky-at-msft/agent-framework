@@ -57,94 +57,27 @@ async def search_knowledge_base(
     Optional environment variable:
         AZURE_SEARCH_API_KEY (if omitted, DefaultAzureCredential is used)
     """
-    endpoint = os.environ.get("AZURE_SEARCH_ENDPOINT")
-    index_name = os.environ.get("AZURE_SEARCH_INDEX_NAME")
-    api_key = os.environ.get("AZURE_SEARCH_API_KEY")
-
-    if not endpoint or not index_name:
-        return (
-            "Azure AI Search is not configured. Set AZURE_SEARCH_ENDPOINT and "
-            "AZURE_SEARCH_INDEX_NAME environment variables."
-        )
-
-    # Use managed identity / Entra ID by default; API key is optional fallback.
-    credential: Any = (
-        AzureKeyCredential(api_key) if api_key else get_credential()
-    )
-
-    def _run() -> str:
-        # The Azure Search SDK is synchronous; run it in a worker thread so a
-        # slow query never blocks the event loop and stalls other requests.
-        client = SearchClient(
-            endpoint=endpoint,
-            index_name=index_name,
-            credential=credential,
-        )
-
-        search_kwargs: dict[str, Any] = {"top": max(1, min(top, 20))}
-        if filter_expression:
-            search_kwargs["filter"] = filter_expression
-
-        results = cast(
-            Iterable[Mapping[str, Any]],
-            client.search(search_text=query, **search_kwargs),
-        )
-        output_results: list[dict[str, Any]] = []
-        for item in results:
-            doc = item
-            snippet = str(
-                doc.get("content")
-                or doc.get("chunk")
-                or doc.get("text")
-                or doc.get("body")
-                or doc.get("description")
-                or ""
-            )
-            output_results.append(
-                {
-                    "title": doc.get("title") or doc.get("name"),
-                    "snippet": snippet,
-                }
-            )
-
-        return json.dumps(
-            {
-                "query": query,
-                "index": index_name,
-                "total_results": len(output_results),
-                "results": output_results,
-            },
-            indent=2,
-        )
-
-    try:
-        return await asyncio.to_thread(_run)
-    except Exception as exc:
-        return f"Azure AI Search query failed: {exc}"
+    return await _search_default_kb(query, top, filter_expression)
 
 
-def _make_kb_search_tool(
-    tool_name: str,
-    tool_description: str,
+def _make_kb_searcher(
     endpoint_env_var: str,
     index_env_var: str,
     api_key_env_var: str = "",
 ):
-    """Factory that creates a @tool-decorated search function bound to a specific index.
+    """Factory that creates a plain async search function bound to a specific index.
+
+    Unlike a @tool, the returned coroutine is awaited directly (deterministic
+    retrieve-then-generate), so a specialist agent does not spend an extra LLM
+    round-trip deciding to invoke a search tool.
 
     Args:
-        tool_name: Unique function name shown to the LLM (no spaces).
-        tool_description: Docstring / tool description shown to the LLM.
         endpoint_env_var: Name of the env var holding the Azure Search endpoint URL.
         index_env_var: Name of the env var holding the target index name.
         api_key_env_var: Optional env var name for an API key; falls back to DefaultAzureCredential.
     """
 
-    async def _search(
-        query: Annotated[str, Field(description="The search query.")],
-        top: Annotated[int, Field(description="Maximum number of results to return.")] = 5,
-        filter_expression: Annotated[str, Field(description="Optional OData filter expression.")] = "",
-    ) -> str:
+    async def _search(query: str, top: int = 5, filter_expression: str = "") -> str:
         endpoint = os.environ.get(endpoint_env_var)
         index_name = os.environ.get(index_env_var)
         api_key = os.environ.get(api_key_env_var) if api_key_env_var else None
@@ -194,68 +127,61 @@ def _make_kb_search_tool(
         except Exception as exc:
             return f"Azure AI Search query failed: {exc}"
 
-    _search.__name__ = tool_name
-    _search.__doc__ = tool_description
-    return tool(approval_mode="never_require")(_search)
+    return _search
+
+
+# Default knowledge-base searcher backing the generic ``search_knowledge_base`` tool.
+_search_default_kb = _make_kb_searcher(
+    endpoint_env_var="AZURE_SEARCH_ENDPOINT",
+    index_env_var="AZURE_SEARCH_INDEX_NAME",
+    api_key_env_var="AZURE_SEARCH_API_KEY",
+)
 
 
 # ---------------------------------------------------------------------------
-# Specialized knowledge-base search tools
-# Each tool points to a distinct Azure AI Search index via its own env vars.
-# Add new tools by calling _make_kb_search_tool with the appropriate env var names.
+# Specialized knowledge-base searchers
+# Each searcher points to a distinct Azure AI Search index via its own env vars
+# and is awaited directly by the orchestrator (retrieve-then-generate).
+# Add new searchers by calling _make_kb_searcher with the appropriate env vars.
 # ---------------------------------------------------------------------------
 
-search_health_benefit_knowledge_base = _make_kb_search_tool(
-    tool_name="search_health_benefit_knowledge_base",
-    tool_description="Search the health benefits knowledge base.",
+search_health_benefit_docs = _make_kb_searcher(
     endpoint_env_var="AZURE_SEARCH_ENDPOINT",
     index_env_var="AZURE_SEARCH_HEALTH_BENEFIT_INDEX_NAME",
     api_key_env_var="AZURE_SEARCH_API_KEY",
 )
 
-search_commuter_knowledge_base = _make_kb_search_tool(
-    tool_name="search_commuter_knowledge_base",
-    tool_description="Search the commuter benefits knowledge base.",
+search_commuter_docs = _make_kb_searcher(
     endpoint_env_var="AZURE_SEARCH_ENDPOINT",
     index_env_var="AZURE_SEARCH_COMMUTER_INDEX_NAME",
     api_key_env_var="AZURE_SEARCH_API_KEY",
 )
 
-search_retirement_knowledge_base = _make_kb_search_tool(
-    tool_name="search_retirement_knowledge_base",
-    tool_description="Search the retirement benefits knowledge base.",
+search_retirement_docs = _make_kb_searcher(
     endpoint_env_var="AZURE_SEARCH_ENDPOINT",
     index_env_var="AZURE_SEARCH_RETIREMENT_INDEX_NAME",
     api_key_env_var="AZURE_SEARCH_API_KEY",
 )
 
-search_hr_policy_knowledge_base = _make_kb_search_tool(
-    tool_name="search_hr_policy_knowledge_base",
-    tool_description="Search the HR policy knowledge base.",
+search_hr_policy_docs = _make_kb_searcher(
     endpoint_env_var="AZURE_SEARCH_ENDPOINT",
     index_env_var="AZURE_SEARCH_HR_POLICY_INDEX_NAME",
     api_key_env_var="AZURE_SEARCH_API_KEY",
 )
 
-search_staff_profile_knowledge_base = _make_kb_search_tool(
-    tool_name="search_staff_profile_knowledge_base",
-    tool_description="Search the staff profile and HR benefits knowledge base.",
+search_staff_profile_docs = _make_kb_searcher(
     endpoint_env_var="AZURE_SEARCH_ENDPOINT",
     index_env_var="AZURE_SEARCH_STAFF_PROFILE_INDEX_NAME",
     api_key_env_var="AZURE_SEARCH_API_KEY",
 )
 
-search_ai_policy_knowledge_base = _make_kb_search_tool(
-    tool_name="search_ai_policy_knowledge_base",
-    tool_description="Search the AI policy and governance knowledge base.",
+search_ai_policy_docs = _make_kb_searcher(
     endpoint_env_var="AZURE_SEARCH_ENDPOINT",
     index_env_var="AZURE_SEARCH_AI_POLICY_INDEX_NAME",
     api_key_env_var="AZURE_SEARCH_API_KEY",
 )
 
-search_data_classification_knowledge_base = _make_kb_search_tool(
-    tool_name="search_data_classification_knowledge_base",
-    tool_description="Search the data classification standards knowledge base.",
+search_data_classification_docs = _make_kb_searcher(
     endpoint_env_var="AZURE_SEARCH_ENDPOINT",
     index_env_var="AZURE_SEARCH_DATA_CLASSIFICATION_INDEX_NAME",
     api_key_env_var="AZURE_SEARCH_API_KEY",
@@ -305,27 +231,31 @@ def calculate_cost(
     if not isinstance(item_list_raw, list):
         return "Error: Input must be a JSON array of items."
 
-    item_list = cast(list[Mapping[str, Any]], item_list_raw)
+    item_list = cast(list[Any], item_list_raw)
 
     total = 0.0
     breakdown: list[str] = []
     for item in item_list:
+        if not isinstance(item, dict):
+            return "Error: Each item must be a JSON object with 'name', 'quantity', and 'unit_price'."
         name = str(item.get("name", "Unknown"))
-        qty = float(item.get("quantity", 1))
-        price = float(item.get("unit_price", 0.0))
+        try:
+            qty = float(item.get("quantity", 1))
+            price = float(item.get("unit_price", 0.0))
+        except (TypeError, ValueError):
+            return f"Error: Item '{name}' has a non-numeric 'quantity' or 'unit_price'."
         subtotal = qty * price
         total += subtotal
         breakdown.append(f"  - {name}: {qty} x ${price:.2f} = ${subtotal:.2f}")
 
-    return f"Cost Breakdown:\n" + "\n".join(breakdown) + f"\n  Total: ${total:.2f}"
+    return "Cost Breakdown:\n" + "\n".join(breakdown) + f"\n  Total: ${total:.2f}"
 
 
 async def fetch_hr_profile(user_name: str) -> str:
     """Fetch the raw HR profile JSON for a user from the Logic App endpoint.
 
-    Shared implementation used by both the ``hr_info_given_userid`` tool and by
-    callers (e.g. the orchestrator) that need the profile deterministically,
-    without spending an extra LLM round-trip just to invoke a tool.
+    Called directly by the orchestrator so the profile is retrieved
+    deterministically, without spending an extra LLM round-trip on a tool call.
     """
     base_url = (
         "https://prod-12.eastus2.logic.azure.com:443/workflows/"
@@ -365,16 +295,5 @@ async def fetch_hr_profile(user_name: str) -> str:
             return f"HR API connection error: {exc.reason}"
 
     return await asyncio.to_thread(_run)
-
-
-@tool(approval_mode="never_require")
-async def hr_info_given_userid(
-    user_name: Annotated[
-        str,
-        Field(description="The user identifier/name to fetch HR profile information for."),
-    ],
-) -> str:
-    """Get user HR profile information for the provided user from the OpenAPI endpoint."""
-    return await fetch_hr_profile(user_name)
 
 
