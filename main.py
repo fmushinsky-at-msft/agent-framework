@@ -146,9 +146,36 @@ async def create_response(request: CustomResponseRequest) -> dict[str, Any]:
     }
 
 
+@app.get("/health")
+async def health() -> dict[str, str]:
+    """Lightweight liveness probe.
+
+    Returns 200 immediately without touching Azure so App Service / APIM health
+    probes never mark a healthy instance as down. A false-negative health probe
+    replaces or fails over instances and is itself a common source of
+    intermittent 502 errors.
+    """
+    return {"status": "ok"}
+
+
 def main():
     logger.info("Starting custom responses server on port 8088")
-    uvicorn.run(app, host="0.0.0.0", port=8088)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8088,
+        # Keep idle backend connections open LONGER than the Azure App Service /
+        # APIM front-end idle timeout (~230s). uvicorn's default keep-alive is only
+        # 5s, so between bursts of Teams traffic it closes pooled connections that
+        # the reverse proxy still believes are open; the proxy then sends the next
+        # request on a dead socket and the caller sees an intermittent 502
+        # (FlowActionBadGateway). Making the server the slower side to recycle idle
+        # connections removes that race.
+        timeout_keep_alive=620,
+        # Honor X-Forwarded-* headers set by APIM / the App Service front end.
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+    )
 
 if __name__ == "__main__":
     main()

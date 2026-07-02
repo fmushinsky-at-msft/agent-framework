@@ -7,17 +7,19 @@ This module is the primary and only implementation for intent-based routing:
 4. Returns a consolidated response
 """
 
+import logging
 import os
 import re
+import time
 from typing import Annotated, Any, Mapping, Optional
 
 from agent_framework import Agent, tool
-from agent_framework.foundry import FoundryChatClient
-from azure.identity import DefaultAzureCredential
 from pydantic import Field
 
+from agents.azure_clients import get_foundry_chat_client
 from agents.prompt_templates import build_template_context, render_prompt_template
 from agents.tools import (
+    fetch_hr_profile,
     get_current_time,
     hr_info_given_userid,
     search_ai_policy_knowledge_base,
@@ -28,6 +30,8 @@ from agents.tools import (
     search_retirement_knowledge_base,
     search_staff_profile_knowledge_base,
 )
+
+logger = logging.getLogger(__name__)
 
 ORCHESTRATOR_INSTRUCTIONS = (
     "You are an assistant that determines the intent of the user question\n"
@@ -145,24 +149,22 @@ class MultiAgentOrchestrator:
 
     def __init__(self, parameters: Mapping[str, Any] | None = None) -> None:
         self.parameters = build_template_context(parameters)
-        self.client = FoundryChatClient(
-            project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-            model=os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"],
-            credential=DefaultAzureCredential(),
+        self.client = get_foundry_chat_client()
+
+        # Optionally run the lightweight intent classifier on a smaller/faster model
+        # deployment. Intent classification only returns a single digit (1-7), so a
+        # "mini" model handles it in a fraction of the time and shaves the biggest
+        # fixed cost off every turn. Falls back to the main model when
+        # AZURE_AI_CLASSIFIER_DEPLOYMENT_NAME is not set.
+        classifier_model = os.environ.get("AZURE_AI_CLASSIFIER_DEPLOYMENT_NAME")
+        classifier_client = (
+            get_foundry_chat_client(classifier_model) if classifier_model else self.client
         )
 
         self.orchestrator = Agent(
-            client=self.client,
+            client=classifier_client,
             instructions=render_prompt_template(ORCHESTRATOR_INSTRUCTIONS, self.parameters),
             name="orchestrator",
-            default_options={"store": False},
-        )
-
-        self.user_profile_agent = Agent(
-            client=self.client,
-            instructions=render_prompt_template(USER_PROFILE_INSTRUCTIONS, self.parameters),
-            name="user_profile",
-            tools=[hr_info_given_userid],
             default_options={"store": False},
         )
 
@@ -219,29 +221,74 @@ class MultiAgentOrchestrator:
         }
 
     async def route(self, user_message: str) -> str:
-        """Run full orchestration: classify, branch, and answer."""
+        """Run full orchestration: classify, branch, and answer.
+
+        Per-hop wall-clock timings are logged at INFO so you can see exactly how
+        many seconds each stage burns and compare the total against the upstream
+        (~15s bot / Copilot Studio) timeout.
+        """
+        turn_start = time.perf_counter()
+
+        classify_start = time.perf_counter()
         intent_response = await self.orchestrator.run(user_message)
+        classify_elapsed = time.perf_counter() - classify_start
+
         intent = self._extract_intent(str(intent_response))
         specialist_input = user_message
 
         if not intent:
+            logger.info(
+                "route timing | intent=none | classify=%.2fs | total=%.2fs",
+                classify_elapsed,
+                time.perf_counter() - turn_start,
+            )
             return "I am not able to answer your question. Please rephrase your question."
 
+        profile_elapsed = 0.0
         if intent in {"1", "3", "4", "5"}:
-            # Keep parity with Foundry workflow which fetches user profile first.
-            profile_response = await self.user_profile_agent.run(user_message)
-            specialist_input = (
-                "User request:\n"
-                f"{user_message}\n\n"
-                "User profile context:\n"
-                f"{profile_response}"
-            )
+            # Fetch the user profile with a direct, deterministic HTTP call instead
+            # of spending a full extra LLM round-trip on an agent whose only job was
+            # to invoke this tool. Removing that hop cuts the orchestrator's tail
+            # latency, which is what intermittently exceeds the upstream (Copilot
+            # Studio / Power Automate / APIM) timeout and surfaces as
+            # FlowActionBadGateway.
+            user_id = str(self.parameters.get("user_id", "")).strip()
+            if user_id:
+                profile_start = time.perf_counter()
+                profile_response = await fetch_hr_profile(user_id)
+                profile_elapsed = time.perf_counter() - profile_start
+                specialist_input = (
+                    "User request:\n"
+                    f"{user_message}\n\n"
+                    "User profile context:\n"
+                    f"{profile_response}"
+                )
 
         specialist = self.specialists.get(intent)
         if specialist is None:
+            logger.info(
+                "route timing | intent=%s | classify=%.2fs | profile=%.2fs | total=%.2fs",
+                intent,
+                classify_elapsed,
+                profile_elapsed,
+                time.perf_counter() - turn_start,
+            )
             return "I am not able to answer your question. Please rephrase your question."
 
+        specialist_start = time.perf_counter()
         response = await specialist.run(specialist_input)
+        specialist_elapsed = time.perf_counter() - specialist_start
+
+        total_elapsed = time.perf_counter() - turn_start
+        logger.info(
+            "route timing | intent=%s (%s) | classify=%.2fs | profile=%.2fs | specialist=%.2fs | total=%.2fs",
+            intent,
+            getattr(specialist, "name", "?"),
+            classify_elapsed,
+            profile_elapsed,
+            specialist_elapsed,
+            total_elapsed,
+        )
         return str(response)
 
     @staticmethod

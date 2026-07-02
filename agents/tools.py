@@ -7,6 +7,7 @@ with pydantic Field descriptions. Each tool sets approval_mode="never_require"
 so the LLM can invoke them without user confirmation.
 """
 
+import asyncio
 import json
 import os
 from datetime import datetime, timezone, timedelta
@@ -16,9 +17,10 @@ from typing import Annotated, Any, Iterable, Mapping, cast
 
 from agent_framework import tool
 from azure.core.credentials import AzureKeyCredential
-from azure.identity import DefaultAzureCredential
 from azure.search.documents import SearchClient
 from pydantic import Field
+
+from agents.azure_clients import get_credential
 
 
 @tool(approval_mode="never_require")
@@ -38,7 +40,7 @@ def get_weather(
 
 
 @tool(approval_mode="never_require")
-def search_knowledge_base(
+async def search_knowledge_base(
     query: Annotated[str, Field(description="The search query to look up in the knowledge base.")],
     top: Annotated[int, Field(description="Maximum number of search results to return.")] = 5,
     filter_expression: Annotated[
@@ -67,20 +69,22 @@ def search_knowledge_base(
 
     # Use managed identity / Entra ID by default; API key is optional fallback.
     credential: Any = (
-        AzureKeyCredential(api_key) if api_key else DefaultAzureCredential()
+        AzureKeyCredential(api_key) if api_key else get_credential()
     )
 
-    client = SearchClient(
-        endpoint=endpoint,
-        index_name=index_name,
-        credential=credential,
-    )
+    def _run() -> str:
+        # The Azure Search SDK is synchronous; run it in a worker thread so a
+        # slow query never blocks the event loop and stalls other requests.
+        client = SearchClient(
+            endpoint=endpoint,
+            index_name=index_name,
+            credential=credential,
+        )
 
-    search_kwargs: dict[str, Any] = {"top": max(1, min(top, 20))}
-    if filter_expression:
-        search_kwargs["filter"] = filter_expression
+        search_kwargs: dict[str, Any] = {"top": max(1, min(top, 20))}
+        if filter_expression:
+            search_kwargs["filter"] = filter_expression
 
-    try:
         results = cast(
             Iterable[Mapping[str, Any]],
             client.search(search_text=query, **search_kwargs),
@@ -114,6 +118,9 @@ def search_knowledge_base(
             },
             indent=2,
         )
+
+    try:
+        return await asyncio.to_thread(_run)
     except Exception as exc:
         return f"Azure AI Search query failed: {exc}"
 
@@ -135,7 +142,7 @@ def _make_kb_search_tool(
         api_key_env_var: Optional env var name for an API key; falls back to DefaultAzureCredential.
     """
 
-    def _search(
+    async def _search(
         query: Annotated[str, Field(description="The search query.")],
         top: Annotated[int, Field(description="Maximum number of results to return.")] = 5,
         filter_expression: Annotated[str, Field(description="Optional OData filter expression.")] = "",
@@ -150,14 +157,17 @@ def _make_kb_search_tool(
                 f"{index_env_var} environment variables."
             )
 
-        credential: Any = AzureKeyCredential(api_key) if api_key else DefaultAzureCredential()
-        client = SearchClient(endpoint=endpoint, index_name=index_name, credential=credential)
+        credential: Any = AzureKeyCredential(api_key) if api_key else get_credential()
 
-        search_kwargs: dict[str, Any] = {"top": max(1, min(top, 20))}
-        if filter_expression:
-            search_kwargs["filter"] = filter_expression
+        def _run() -> str:
+            # Offload the synchronous Azure Search SDK to a worker thread so it
+            # does not block the event loop under concurrent requests.
+            client = SearchClient(endpoint=endpoint, index_name=index_name, credential=credential)
 
-        try:
+            search_kwargs: dict[str, Any] = {"top": max(1, min(top, 20))}
+            if filter_expression:
+                search_kwargs["filter"] = filter_expression
+
             results = cast(Iterable[Mapping[str, Any]], client.search(search_text=query, **search_kwargs))
             output_results: list[dict[str, Any]] = []
             for item in results:
@@ -182,6 +192,9 @@ def _make_kb_search_tool(
                 {"query": query, "index": index_name, "total_results": len(output_results), "results": output_results},
                 indent=2,
             )
+
+        try:
+            return await asyncio.to_thread(_run)
         except Exception as exc:
             return f"Azure AI Search query failed: {exc}"
 
@@ -311,14 +324,13 @@ def calculate_cost(
     return f"Cost Breakdown:\n" + "\n".join(breakdown) + f"\n  Total: ${total:.2f}"
 
 
-@tool(approval_mode="never_require")
-def hr_info_given_userid(
-    user_name: Annotated[
-        str,
-        Field(description="The user identifier/name to fetch HR profile information for."),
-    ],
-) -> str:
-    """Get user HR profile information for the provided user from the OpenAPI endpoint."""
+async def fetch_hr_profile(user_name: str) -> str:
+    """Fetch the raw HR profile JSON for a user from the Logic App endpoint.
+
+    Shared implementation used by both the ``hr_info_given_userid`` tool and by
+    callers (e.g. the orchestrator) that need the profile deterministically,
+    without spending an extra LLM round-trip just to invoke a tool.
+    """
     base_url = (
         "https://prod-12.eastus2.logic.azure.com:443/workflows/"
         "e518d7921d7f4f2ebd1b9dc00df606ad/triggers/When_a_HTTP_request_is_received/paths/invoke"
@@ -333,24 +345,40 @@ def hr_info_given_userid(
     )
     url = f"{base_url}?{query}"
     payload = json.dumps({"userid": user_name}).encode("utf-8")
-    req = request.Request(
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
 
-    try:
-        with request.urlopen(req, timeout=20) as resp:
-            body = resp.read().decode("utf-8")
-            try:
-                return json.dumps(json.loads(body), indent=2)
-            except json.JSONDecodeError:
-                return body
-    except error.HTTPError as exc:
-        details = exc.read().decode("utf-8", errors="ignore")
-        return f"HR API HTTP error {exc.code}: {details}"
-    except error.URLError as exc:
-        return f"HR API connection error: {exc.reason}"
+    def _run() -> str:
+        # urllib is blocking; run it in a worker thread so the HR API round-trip
+        # cannot stall the event loop and other concurrent requests.
+        req = request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with request.urlopen(req, timeout=20) as resp:
+                body = resp.read().decode("utf-8")
+                try:
+                    return json.dumps(json.loads(body), indent=2)
+                except json.JSONDecodeError:
+                    return body
+        except error.HTTPError as exc:
+            details = exc.read().decode("utf-8", errors="ignore")
+            return f"HR API HTTP error {exc.code}: {details}"
+        except error.URLError as exc:
+            return f"HR API connection error: {exc.reason}"
+
+    return await asyncio.to_thread(_run)
+
+
+@tool(approval_mode="never_require")
+async def hr_info_given_userid(
+    user_name: Annotated[
+        str,
+        Field(description="The user identifier/name to fetch HR profile information for."),
+    ],
+) -> str:
+    """Get user HR profile information for the provided user from the OpenAPI endpoint."""
+    return await fetch_hr_profile(user_name)
 
 

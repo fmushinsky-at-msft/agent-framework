@@ -10,13 +10,11 @@ so it only sees the output of the previous agent. The workflow is exposed
 as a single composite agent via .as_agent().
 """
 
-import os
 from typing import Any, Mapping
 
 from agent_framework import Agent, AgentExecutor, WorkflowBuilder
-from agent_framework.foundry import FoundryChatClient
-from azure.identity import DefaultAzureCredential
 
+from agents.azure_clients import get_foundry_chat_client
 from agents.prompt_templates import render_prompt_template
 from agents.tools import get_weather, search_knowledge_base, get_current_time
 
@@ -69,11 +67,7 @@ def create_workflow_agent(parameters: Mapping[str, Any] | None = None) -> Agent:
         FOUNDRY_PROJECT_ENDPOINT — Azure AI Foundry project endpoint.
         AZURE_AI_MODEL_DEPLOYMENT_NAME — Model deployment name.
     """
-    client = FoundryChatClient(
-        project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-        model=os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"],
-        credential=DefaultAzureCredential(),
-    )
+    client = get_foundry_chat_client()
 
     # --- Agent definitions ---
     researcher = Agent(
