@@ -5,6 +5,17 @@ from typing import Any, Mapping
 
 _PLACEHOLDER_PATTERN = re.compile(r"\{([^{}]+)\}")
 
+# Reusable instruction appended to answering agents so they never emit cryptic
+# source-citation markers (e.g. "[371:1\u2020source]", "\u30103:0\u2020source\u3011")
+# to end users.
+NO_SOURCE_REFERENCES_RULE = (
+    "\n\n# Output formatting\n"
+    "- Do NOT include any source citations, reference markers, document IDs, or "
+    "chunk IDs in your answer. Never emit tokens such as \"[371:1\u2020source]\", "
+    "\"\u30103:0\u2020source\u3011\", \"[doc1]\", or any bracketed \"source\" tag. "
+    "Return only clean, human-readable text with no bracketed reference markers."
+)
+
 
 def build_template_context(parameters: Mapping[str, Any] | None) -> dict[str, Any]:
     """Build a normalized context for placeholder rendering.

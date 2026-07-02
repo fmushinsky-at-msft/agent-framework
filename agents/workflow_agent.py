@@ -15,7 +15,7 @@ from typing import Any, Mapping
 from agent_framework import Agent, AgentExecutor, WorkflowBuilder
 
 from agents.azure_clients import get_foundry_chat_client
-from agents.prompt_templates import render_prompt_template
+from agents.prompt_templates import NO_SOURCE_REFERENCES_RULE, render_prompt_template
 from agents.tools import get_weather, search_knowledge_base, get_current_time
 
 RESEARCHER_INSTRUCTIONS = (
@@ -24,8 +24,7 @@ RESEARCHER_INSTRUCTIONS = (
     "- Search the knowledge base for relevant documentation and guides.\n"
     "- Look up weather data if the topic is location-related.\n"
     "- Check the current time if temporal context is needed.\n\n"
-    "Compile all findings into a structured research brief with clear sections. "
-    "Include source references where applicable."
+    "Compile all findings into a structured research brief with clear sections."
 )
 
 ANALYST_INSTRUCTIONS = (
@@ -72,7 +71,7 @@ def create_workflow_agent(parameters: Mapping[str, Any] | None = None) -> Agent:
     # --- Agent definitions ---
     researcher = Agent(
         client=client,
-        instructions=render_prompt_template(RESEARCHER_INSTRUCTIONS, parameters),
+        instructions=render_prompt_template(RESEARCHER_INSTRUCTIONS, parameters) + NO_SOURCE_REFERENCES_RULE,
         name="researcher",
         tools=[get_weather, search_knowledge_base, get_current_time],
         default_options={"store": False},
@@ -80,14 +79,14 @@ def create_workflow_agent(parameters: Mapping[str, Any] | None = None) -> Agent:
 
     analyst = Agent(
         client=client,
-        instructions=render_prompt_template(ANALYST_INSTRUCTIONS, parameters),
+        instructions=render_prompt_template(ANALYST_INSTRUCTIONS, parameters) + NO_SOURCE_REFERENCES_RULE,
         name="analyst",
         default_options={"store": False},
     )
 
     formatter = Agent(
         client=client,
-        instructions=render_prompt_template(FORMATTER_INSTRUCTIONS, parameters),
+        instructions=render_prompt_template(FORMATTER_INSTRUCTIONS, parameters) + NO_SOURCE_REFERENCES_RULE,
         name="formatter",
         default_options={"store": False},
     )

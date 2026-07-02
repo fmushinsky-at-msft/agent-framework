@@ -12,7 +12,7 @@ from typing import Any, Mapping
 from agent_framework import Agent
 
 from agents.azure_clients import get_foundry_chat_client
-from agents.prompt_templates import render_prompt_template
+from agents.prompt_templates import NO_SOURCE_REFERENCES_RULE, render_prompt_template
 from agents.tools import calculate_cost, get_current_time, get_weather, search_knowledge_base
 
 INSTRUCTIONS = (
@@ -38,7 +38,7 @@ def create_basic_agent(parameters: Mapping[str, Any] | None = None) -> Agent:
 
     agent = Agent(
         client=client,
-        instructions=render_prompt_template(INSTRUCTIONS, parameters),
+        instructions=render_prompt_template(INSTRUCTIONS, parameters) + NO_SOURCE_REFERENCES_RULE,
         tools=[get_weather, search_knowledge_base, get_current_time, calculate_cost],
         # History is managed by the hosting infrastructure (ResponsesHostServer),
         # so disable server-side storage.

@@ -17,7 +17,11 @@ from agent_framework import Agent, tool
 from pydantic import Field
 
 from agents.azure_clients import get_foundry_chat_client
-from agents.prompt_templates import build_template_context, render_prompt_template
+from agents.prompt_templates import (
+    NO_SOURCE_REFERENCES_RULE,
+    build_template_context,
+    render_prompt_template,
+)
 from agents.tools import (
     fetch_hr_profile,
     get_current_time,
@@ -171,49 +175,49 @@ class MultiAgentOrchestrator:
         self.specialists = {
             "1": Agent(
                 client=self.client,
-                instructions=render_prompt_template(HEALTH_BENEFIT_INSTRUCTIONS, self.parameters),
+                instructions=render_prompt_template(HEALTH_BENEFIT_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="health_benefit",
                 tools=[search_health_benefit_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
             "2": Agent(
                 client=self.client,
-                instructions=render_prompt_template(COMMUTER_INSTRUCTIONS, self.parameters),
+                instructions=render_prompt_template(COMMUTER_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="commuter",
                 tools=[search_commuter_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
             "3": Agent(
                 client=self.client,
-                instructions=render_prompt_template(RETIREMENT_INSTRUCTIONS, self.parameters),
+                instructions=render_prompt_template(RETIREMENT_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="retirement",
                 tools=[search_retirement_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
             "4": Agent(
                 client=self.client,
-                instructions=render_prompt_template(HR_POLICY_INSTRUCTIONS, self.parameters),
+                instructions=render_prompt_template(HR_POLICY_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="hr_policy",
                 tools=[search_hr_policy_knowledge_base, get_current_time, hr_info_given_userid],
                 default_options={"store": False},
             ),
             "5": Agent(
                 client=self.client,
-                instructions=render_prompt_template(STAFF_PROFILE_INSTRUCTIONS, self.parameters),
+                instructions=render_prompt_template(STAFF_PROFILE_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="staff_profile",
                 tools=[search_staff_profile_knowledge_base, get_current_time, hr_info_given_userid],
                 default_options={"store": False},
             ),
             "6": Agent(
                 client=self.client,
-                instructions=render_prompt_template(AI_POLICY_INSTRUCTIONS, self.parameters),
+                instructions=render_prompt_template(AI_POLICY_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="ai_policy",
                 tools=[search_ai_policy_knowledge_base, get_current_time],
                 default_options={"store": False},
             ),
             "7": Agent(
                 client=self.client,
-                instructions=render_prompt_template(DATA_CLASSIFICATION_INSTRUCTIONS, self.parameters),
+                instructions=render_prompt_template(DATA_CLASSIFICATION_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="data_classification",
                 tools=[search_data_classification_knowledge_base, get_current_time],
                 default_options={"store": False},

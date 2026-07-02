@@ -22,6 +22,7 @@ Environment variables:
 """
 
 import logging
+import re
 from typing import Any
 
 from dotenv import load_dotenv
@@ -57,6 +58,22 @@ class CustomResponseRequest(BaseModel):
     )
 
 
+# Strip cryptic source-citation markers (e.g. "[371:1†source]", "【3:0†source】")
+# that models sometimes append when answering from retrieved documents, so they
+# never surface in the end-user (Teams) response.
+_CITATION_MARKER_PATTERN = re.compile(
+    r"[\[【][^\]】]*?(?:†|\+)\s*source[^\]】]*?[\]】]",
+    re.IGNORECASE,
+)
+
+
+def _strip_citation_markers(text: str) -> str:
+    """Remove cryptic bracketed source-citation markers from model output."""
+    cleaned = _CITATION_MARKER_PATTERN.sub("", text)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return re.sub(r"[ \t]+([.,;:!?])", r"\1", cleaned).strip()
+
+
 def _extract_text_response(response: Any) -> str:
     """Extract readable text from AgentResponse-like objects."""
     messages = getattr(response, "messages", None)
@@ -78,7 +95,7 @@ def _extract_text_response(response: Any) -> str:
                 elif getattr(content, "data", None):
                     chunks.append(str(content.data))
         if chunks:
-            return "\n".join(chunks)
+            return _strip_citation_markers("\n".join(chunks))
     return ""
 
 
