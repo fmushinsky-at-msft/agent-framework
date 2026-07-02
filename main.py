@@ -32,7 +32,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
-from agents.azure_clients import build_model_options
+from agents.azure_clients import (
+    build_model_options,
+    disable_reasoning_options,
+    reasoning_options_active,
+)
 from agents.basic_agent import create_basic_agent
 from agents.multi_agent_orchestrator import create_multi_agent_orchestrator_agent
 from agents.workflow_agent import create_workflow_agent
@@ -115,67 +119,103 @@ def _create_agent_for_mode(agent_id: str, parameters: dict[str, Any]):
     )
 
 
+async def _run_agent(request: CustomResponseRequest) -> tuple[Any, Any]:
+    """Create the agent, open the session, and run it. Returns (response, session)."""
+    agent = _create_agent_for_mode(request.agentid, request.parameters)
+    incoming_conversation_id = (request.conversation_id or "").strip() or None
+    session = (
+        agent.get_session(incoming_conversation_id)
+        if incoming_conversation_id
+        else agent.create_session()
+    )
+    # Force service-side storage so Foundry manages multi-turn conversation natively.
+    response = await agent.run(
+        request.message,
+        stream=False,
+        session=session,
+        options=build_model_options(store=True),
+    )
+    return response, session
+
+
+def _is_unsupported_reasoning_error(err: str) -> bool:
+    """Heuristic: does this error look like the model/framework rejecting the
+    optional reasoning/verbosity parameters?"""
+    e = err.lower()
+    mentions_param = "reasoning" in e or "verbosity" in e
+    looks_unsupported = any(
+        kw in e
+        for kw in ("unsupported", "unrecognized", "unknown", "not support", "invalid", "extra_forbidden", "400")
+    )
+    return mentions_param and looks_unsupported
+
+
+def _error_response(exc: Exception, req_start: float, agentid: str) -> JSONResponse:
+    """Map an agent failure to a graceful JSON error response."""
+    err_str = str(exc)
+    logger.error(
+        "Agent run FAILED after %.2fs (agentid=%s): %s",
+        time.perf_counter() - req_start,
+        agentid,
+        err_str,
+    )
+    # Surface connectivity / auth errors as 503; other failures as 500.
+    if any(kw in err_str for kw in ("Connection error", "ConnectError", "timed out", "timeout")):
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Upstream service unavailable. Please retry.", "detail": err_str[:400]},
+        )
+    if "DefaultAzureCredential" in err_str or "authentication" in err_str.lower():
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Authentication failed. Ensure you are logged in with `az login` or `azd auth login`.", "detail": err_str[:400]},
+        )
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Agent request failed.", "detail": err_str[:400]},
+    )
+
+
 app = FastAPI(title="Agent Framework Custom Responses API", version="1.0.0")
 
 
 @app.post("/responses")
 async def create_response(request: CustomResponseRequest) -> dict[str, Any]:
     req_start = time.perf_counter()
+    agentid = request.agentid.lower()
 
-    # Build the agent, open the session, and run it — all inside the handler so a
-    # failure during agent creation (e.g. missing configuration) surfaces as the
-    # same graceful JSON error as a failure during the run.
     try:
-        agent = _create_agent_for_mode(request.agentid, request.parameters)
-        incoming_conversation_id = (request.conversation_id or "").strip() or None
-        session = (
-            agent.get_session(incoming_conversation_id)
-            if incoming_conversation_id
-            else agent.create_session()
-        )
-
-        # Force service-side storage so Foundry manages multi-turn conversation natively.
-        response: Any = await agent.run(
-            request.message,
-            stream=False,
-            session=session,
-            options=build_model_options(store=True),
-        )
+        response, session = await _run_agent(request)
     except HTTPException:
         # Preserve explicit HTTP errors (e.g. invalid agentid -> 400).
         raise
     except Exception as exc:
-        err_str = str(exc)
-        logger.error(
-            "Agent run FAILED after %.2fs (agentid=%s): %s",
-            time.perf_counter() - req_start,
-            request.agentid.lower(),
-            err_str,
-        )
-        # Surface connectivity / auth errors as 503; other failures as 500.
-        if any(kw in err_str for kw in ("Connection error", "ConnectError", "timed out", "timeout")):
-            return JSONResponse(
-                status_code=503,
-                content={"error": "Upstream service unavailable. Please retry.", "detail": err_str[:400]},
+        # Self-heal: if the optional reasoning/verbosity params were rejected, drop
+        # them (process-wide) and retry once so a shape/param mismatch can never take
+        # the endpoint down.
+        if reasoning_options_active() and _is_unsupported_reasoning_error(str(exc)):
+            logger.warning(
+                "Reasoning/verbosity options rejected; disabling them and retrying once. Detail: %s",
+                str(exc)[:300],
             )
-        if "DefaultAzureCredential" in err_str or "authentication" in err_str.lower():
-            return JSONResponse(
-                status_code=503,
-                content={"error": "Authentication failed. Ensure you are logged in with `az login` or `azd auth login`.", "detail": err_str[:400]},
-            )
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Agent request failed.", "detail": err_str[:400]},
-        )
+            disable_reasoning_options()
+            try:
+                response, session = await _run_agent(request)
+            except HTTPException:
+                raise
+            except Exception as exc2:
+                return _error_response(exc2, req_start, agentid)
+        else:
+            return _error_response(exc, req_start, agentid)
 
     returned_conversation_id = session.service_session_id or session.session_id
     logger.info(
         "request timing | agentid=%s | end_to_end_total=%.2fs",
-        request.agentid.lower(),
+        agentid,
         time.perf_counter() - req_start,
     )
     return {
-        "agentid": request.agentid.lower(),
+        "agentid": agentid,
         "output": _extract_text_response(response),
         "conversation_id": returned_conversation_id,
         "service_conversation_id": session.service_session_id,

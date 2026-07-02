@@ -32,41 +32,68 @@ def get_credential() -> DefaultAzureCredential:
     return DefaultAzureCredential()
 
 
-@lru_cache(maxsize=None)
-def get_foundry_chat_client(model: str | None = None) -> FoundryChatClient:
-    """Return a process-wide, reusable ``FoundryChatClient`` for a model deployment.
+@lru_cache(maxsize=1)
+def get_foundry_chat_client() -> FoundryChatClient:
+    """Return a process-wide, reusable ``FoundryChatClient``.
 
     Created lazily on first use (inside the running event loop) so the shared
     connection pool is reused across requests instead of being rebuilt each time.
-    A distinct client is cached per model deployment name; pass ``None`` (default)
-    to use ``AZURE_AI_MODEL_DEPLOYMENT_NAME`` (e.g. pass a smaller/faster deployment
-    for intent classification).
+    The same model is used for both intent classification and grounded answers.
 
     Environment variables required:
         FOUNDRY_PROJECT_ENDPOINT - Azure AI Foundry project endpoint.
-        AZURE_AI_MODEL_DEPLOYMENT_NAME - Default model deployment name.
+        AZURE_AI_MODEL_DEPLOYMENT_NAME - Model deployment name.
     """
     return FoundryChatClient(
         project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-        model=model or os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"],
+        model=os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"],
         credential=get_credential(),
     )
+
+
+# Process-wide flag: flipped to False by ``disable_reasoning_options`` if the model
+# or framework rejects the optional reasoning/verbosity parameters, so we stop
+# sending them and self-heal instead of failing every request.
+_reasoning_options_enabled = True
+
+
+def reasoning_options_configured() -> bool:
+    """True if a reasoning/verbosity env var is set (the feature was requested)."""
+    return bool(
+        os.environ.get("AZURE_AI_REASONING_EFFORT")
+        or os.environ.get("AZURE_AI_VERBOSITY")
+    )
+
+
+def reasoning_options_active() -> bool:
+    """True if reasoning options are configured and have not been auto-disabled."""
+    return _reasoning_options_enabled and reasoning_options_configured()
+
+
+def disable_reasoning_options() -> None:
+    """Stop sending reasoning/verbosity options for the rest of this process."""
+    global _reasoning_options_enabled
+    _reasoning_options_enabled = False
 
 
 def build_model_options(store: bool = False) -> dict[str, Any]:
     """Build per-request model options, adding optional reasoning controls.
 
-    Reasoning effort and verbosity are ONLY included when their env vars are set,
-    so the default behaviour is unchanged and non-reasoning models (which reject
-    these parameters) are unaffected. They apply to reasoning-capable models
-    (e.g. the GPT-5 family) and lower values reduce latency:
+    Reasoning effort and verbosity are ONLY included when their env vars are set
+    (and not auto-disabled), so the default behaviour is unchanged and non-reasoning
+    models (which reject these parameters) are unaffected. They apply to
+    reasoning-capable models (e.g. the GPT-5 family) and lower values reduce latency:
         AZURE_AI_REASONING_EFFORT  - "minimal" | "low" | "medium" | "high"
         AZURE_AI_VERBOSITY         - "low" | "medium" | "high"
 
     The nested ``reasoning``/``text`` shape matches the Responses API request body
-    (the same channel as ``store``).
+    (the same channel as ``store``). If the model/framework rejects that shape,
+    ``disable_reasoning_options`` is called (see main.py) and only ``store`` is
+    returned on subsequent calls.
     """
     options: dict[str, Any] = {"store": store}
+    if not _reasoning_options_enabled:
+        return options
 
     effort = os.environ.get("AZURE_AI_REASONING_EFFORT")
     if effort:

@@ -8,7 +8,6 @@ This module is the primary and only implementation for intent-based routing:
 """
 
 import logging
-import os
 import re
 import time
 from typing import Annotated, Any, Mapping, Optional
@@ -145,17 +144,8 @@ class MultiAgentOrchestrator:
         self.parameters = build_template_context(parameters)
         self.client = get_foundry_chat_client()
 
-        # Optionally run the lightweight intent classifier on a smaller/faster model
-        # deployment. Intent classification only returns a single digit (1-7), so a
-        # "mini"/"nano" model handles it in a fraction of the time. Falls back to the
-        # main model when AZURE_AI_CLASSIFIER_DEPLOYMENT_NAME is not set.
-        classifier_model = os.environ.get("AZURE_AI_CLASSIFIER_DEPLOYMENT_NAME")
-        classifier_client = (
-            get_foundry_chat_client(classifier_model) if classifier_model else self.client
-        )
-
         self.orchestrator = Agent(
-            client=classifier_client,
+            client=self.client,
             instructions=render_prompt_template(ORCHESTRATOR_INSTRUCTIONS, self.parameters),
             name="orchestrator",
             default_options=build_model_options(),
@@ -308,8 +298,14 @@ class MultiAgentOrchestrator:
 
     @staticmethod
     def _extract_intent(response: str) -> Optional[str]:
-        match = re.search(r"\b[1-7]\b", response)
-        return match.group(0) if match else None
+        text = response.strip()
+        # The classifier is instructed to reply with the digit only.
+        if text in {"1", "2", "3", "4", "5", "6", "7"}:
+            return text
+        # Fallback: a standalone 1-7 anchored at the start or end of the reply, so a
+        # stray digit in the middle of chatty output can't cause a misroute.
+        match = re.search(r"^\s*([1-7])\b", text) or re.search(r"\b([1-7])\s*$", text)
+        return match.group(1) if match else None
 
 
 def create_multi_agent_orchestrator_agent(parameters: Mapping[str, Any] | None = None) -> Agent:

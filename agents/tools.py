@@ -60,6 +60,11 @@ async def search_knowledge_base(
     return await _search_default_kb(query, top, filter_expression)
 
 
+# Cap each search snippet so injected grounding context can't blow the model's
+# context window (especially smaller/"nano" deployments).
+_MAX_SNIPPET_CHARS = 1200
+
+
 def _make_kb_searcher(
     endpoint_env_var: str,
     index_env_var: str,
@@ -111,6 +116,8 @@ def _make_kb_searcher(
                     or doc.get("description")
                     or ""
                 )
+                if len(snippet) > _MAX_SNIPPET_CHARS:
+                    snippet = snippet[:_MAX_SNIPPET_CHARS].rstrip() + "..."
                 output_results.append(
                     {
                         "title": doc.get("title") or doc.get("name"),
