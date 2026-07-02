@@ -23,6 +23,7 @@ Environment variables:
 
 import logging
 import re
+import time
 from typing import Any
 
 from dotenv import load_dotenv
@@ -118,6 +119,7 @@ app = FastAPI(title="Agent Framework Custom Responses API", version="1.0.0")
 
 @app.post("/responses")
 async def create_response(request: CustomResponseRequest) -> dict[str, Any]:
+    req_start = time.perf_counter()
     agent = _create_agent_for_mode(request.agentid, request.parameters)
     incoming_conversation_id = (request.conversation_id or "").strip() or None
     session = (
@@ -136,7 +138,12 @@ async def create_response(request: CustomResponseRequest) -> dict[str, Any]:
         )
     except Exception as exc:
         err_str = str(exc)
-        logger.error("Agent run failed: %s", err_str)
+        logger.error(
+            "Agent run FAILED after %.2fs (agentid=%s): %s",
+            time.perf_counter() - req_start,
+            request.agentid.lower(),
+            err_str,
+        )
         # Surface connectivity / auth errors as 503; other failures as 500.
         if any(kw in err_str for kw in ("Connection error", "ConnectError", "timed out", "timeout")):
             return JSONResponse(
@@ -154,6 +161,11 @@ async def create_response(request: CustomResponseRequest) -> dict[str, Any]:
         )
 
     returned_conversation_id = session.service_session_id or session.session_id
+    logger.info(
+        "request timing | agentid=%s | end_to_end_total=%.2fs",
+        request.agentid.lower(),
+        time.perf_counter() - req_start,
+    )
     return {
         "agentid": request.agentid.lower(),
         "output": _extract_text_response(response),

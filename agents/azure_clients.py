@@ -31,22 +31,19 @@ def get_credential() -> DefaultAzureCredential:
 	return DefaultAzureCredential()
 
 
-@lru_cache(maxsize=None)
-def get_foundry_chat_client(model: str | None = None) -> FoundryChatClient:
-	"""Return a process-wide, reusable ``FoundryChatClient`` for a model deployment.
+@lru_cache(maxsize=1)
+def get_foundry_chat_client() -> FoundryChatClient:
+	"""Return a process-wide, reusable ``FoundryChatClient``.
 
 	Created lazily on first use (inside the running event loop) so the shared
 	connection pool is reused across requests instead of being rebuilt each time.
-	A distinct client is cached per model deployment name; pass ``None`` (default)
-	to use ``AZURE_AI_MODEL_DEPLOYMENT_NAME`` (e.g. pass a smaller/faster deployment
-	for intent classification).
 
 	Environment variables required:
 		FOUNDRY_PROJECT_ENDPOINT — Azure AI Foundry project endpoint.
-		AZURE_AI_MODEL_DEPLOYMENT_NAME — Default model deployment name.
+		AZURE_AI_MODEL_DEPLOYMENT_NAME — Model deployment name.
 	"""
 	return FoundryChatClient(
 		project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-		model=model or os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"],
+		model=os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"],
 		credential=get_credential(),
 	)

@@ -8,7 +8,6 @@ This module is the primary and only implementation for intent-based routing:
 """
 
 import logging
-import os
 import re
 import time
 from typing import Annotated, Any, Mapping, Optional
@@ -155,18 +154,8 @@ class MultiAgentOrchestrator:
         self.parameters = build_template_context(parameters)
         self.client = get_foundry_chat_client()
 
-        # Optionally run the lightweight intent classifier on a smaller/faster model
-        # deployment. Intent classification only returns a single digit (1-7), so a
-        # "mini" model handles it in a fraction of the time and shaves the biggest
-        # fixed cost off every turn. Falls back to the main model when
-        # AZURE_AI_CLASSIFIER_DEPLOYMENT_NAME is not set.
-        classifier_model = os.environ.get("AZURE_AI_CLASSIFIER_DEPLOYMENT_NAME")
-        classifier_client = (
-            get_foundry_chat_client(classifier_model) if classifier_model else self.client
-        )
-
         self.orchestrator = Agent(
-            client=classifier_client,
+            client=self.client,
             instructions=render_prompt_template(ORCHESTRATOR_INSTRUCTIONS, self.parameters),
             name="orchestrator",
             default_options={"store": False},
