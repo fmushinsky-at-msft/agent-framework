@@ -16,7 +16,7 @@ from typing import Annotated, Any, Mapping, Optional
 from agent_framework import Agent, tool
 from pydantic import Field
 
-from agents.azure_clients import get_foundry_chat_client
+from agents.azure_clients import build_model_options, get_foundry_chat_client
 from agents.prompt_templates import (
     NO_SOURCE_REFERENCES_RULE,
     build_template_context,
@@ -158,7 +158,7 @@ class MultiAgentOrchestrator:
             client=classifier_client,
             instructions=render_prompt_template(ORCHESTRATOR_INSTRUCTIONS, self.parameters),
             name="orchestrator",
-            default_options={"store": False},
+            default_options=build_model_options(),
         )
 
         self.specialists = {
@@ -166,43 +166,43 @@ class MultiAgentOrchestrator:
                 client=self.client,
                 instructions=render_prompt_template(HEALTH_BENEFIT_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="health_benefit",
-                default_options={"store": False},
+                default_options=build_model_options(),
             ),
             "2": Agent(
                 client=self.client,
                 instructions=render_prompt_template(COMMUTER_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="commuter",
-                default_options={"store": False},
+                default_options=build_model_options(),
             ),
             "3": Agent(
                 client=self.client,
                 instructions=render_prompt_template(RETIREMENT_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="retirement",
-                default_options={"store": False},
+                default_options=build_model_options(),
             ),
             "4": Agent(
                 client=self.client,
                 instructions=render_prompt_template(HR_POLICY_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="hr_policy",
-                default_options={"store": False},
+                default_options=build_model_options(),
             ),
             "5": Agent(
                 client=self.client,
                 instructions=render_prompt_template(STAFF_PROFILE_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="staff_profile",
-                default_options={"store": False},
+                default_options=build_model_options(),
             ),
             "6": Agent(
                 client=self.client,
                 instructions=render_prompt_template(AI_POLICY_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="ai_policy",
-                default_options={"store": False},
+                default_options=build_model_options(),
             ),
             "7": Agent(
                 client=self.client,
                 instructions=render_prompt_template(DATA_CLASSIFICATION_INSTRUCTIONS, self.parameters) + NO_SOURCE_REFERENCES_RULE,
                 name="data_classification",
-                default_options={"store": False},
+                default_options=build_model_options(),
             ),
         }
 
@@ -339,7 +339,7 @@ def create_multi_agent_orchestrator_agent(parameters: Mapping[str, Any] | None =
             parameters,
         ),
         tools=[route_employee_request],
-        default_options={"store": False},
+        default_options=build_model_options(),
     )
 
 

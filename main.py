@@ -32,6 +32,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
+from agents.azure_clients import build_model_options
 from agents.basic_agent import create_basic_agent
 from agents.multi_agent_orchestrator import create_multi_agent_orchestrator_agent
 from agents.workflow_agent import create_workflow_agent
@@ -138,7 +139,7 @@ async def create_response(request: CustomResponseRequest) -> dict[str, Any]:
             request.message,
             stream=False,
             session=session,
-            options={"store": True},
+            options=build_model_options(store=True),
         )
     except HTTPException:
         # Preserve explicit HTTP errors (e.g. invalid agentid -> 400).

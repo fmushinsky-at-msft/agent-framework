@@ -16,6 +16,7 @@ and are constant for the process lifetime, so a single client is correct.
 
 import os
 from functools import lru_cache
+from typing import Any
 
 from agent_framework.foundry import FoundryChatClient
 from azure.identity import DefaultAzureCredential
@@ -50,3 +51,29 @@ def get_foundry_chat_client(model: str | None = None) -> FoundryChatClient:
         model=model or os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"],
         credential=get_credential(),
     )
+
+
+def build_model_options(store: bool = False) -> dict[str, Any]:
+    """Build per-request model options, adding optional reasoning controls.
+
+    Reasoning effort and verbosity are ONLY included when their env vars are set,
+    so the default behaviour is unchanged and non-reasoning models (which reject
+    these parameters) are unaffected. They apply to reasoning-capable models
+    (e.g. the GPT-5 family) and lower values reduce latency:
+        AZURE_AI_REASONING_EFFORT  - "minimal" | "low" | "medium" | "high"
+        AZURE_AI_VERBOSITY         - "low" | "medium" | "high"
+
+    The nested ``reasoning``/``text`` shape matches the Responses API request body
+    (the same channel as ``store``).
+    """
+    options: dict[str, Any] = {"store": store}
+
+    effort = os.environ.get("AZURE_AI_REASONING_EFFORT")
+    if effort:
+        options["reasoning"] = {"effort": effort}
+
+    verbosity = os.environ.get("AZURE_AI_VERBOSITY")
+    if verbosity:
+        options["text"] = {"verbosity": verbosity}
+
+    return options
