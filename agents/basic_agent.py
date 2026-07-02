@@ -11,7 +11,7 @@ from typing import Any, Mapping
 
 from agent_framework import Agent
 
-from agents.azure_clients import get_foundry_chat_client
+from agents.azure_clients import build_model_options, get_foundry_chat_client
 from agents.prompt_templates import NO_SOURCE_REFERENCES_RULE, render_prompt_template
 from agents.tools import calculate_cost, get_current_time, get_weather, search_knowledge_base
 
@@ -43,7 +43,7 @@ def create_basic_agent(parameters: Mapping[str, Any] | None = None) -> Agent:
         # History is managed by the hosting infrastructure (ResponsesHostServer),
         # so disable server-side storage.
         # https://developers.openai.com/api/reference/resources/responses/methods/create
-        default_options={"store": False},
+        default_options=build_model_options(),
     )
 
     return agent

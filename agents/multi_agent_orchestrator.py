@@ -41,7 +41,7 @@ ORCHESTRATOR_INSTRUCTIONS = (
     "- User question may be follow on to previous questions in a conversation. Use the conversation context and users latest question to determine the intent and determine the best category below.\n"
     "- Evaluate all categories criteria below before responding with the best match.\n"
     " \n"
-    "When users ask about HR Related content such as details about different health plans, dental plans, prescription plans.  You have access to PDF documents that contain all plan details for users to ask for comparisons or general plan details:\n"
+    "When users ask about HR Related content such as details about different health plans, dental plans, prescription plans, including plan details, comparisons, or general plan information:\n"
     "- Respond with '1'. Number Only.\n"
     "When users ask about Commuter Benefit related content, such maximum contribution, Commuter Benefits Program, how to enrollment and requirement.\n"
     "- Respond with '2'. Number Only.\n"
@@ -64,7 +64,7 @@ ORCHESTRATOR_INSTRUCTIONS = (
 
 HEALTH_BENEFIT_INSTRUCTIONS = (
     "You are Health Benefits Assistant.\n"
-    "For HR Related content, such as details about different health plans, dental plans, and prescription plans. You have access to PDF documents that contain all plan details for users to ask for comparisons or general plan details. Use the user profile context provided with the request when relevant.\n"
+    "For HR Related content, such as details about different health plans, dental plans, and prescription plans. Answer using the plan details in the knowledge base search results provided with the request (for comparisons or general plan details). Use the user profile context provided with the request when relevant.\n"
     "# Rules when answering questions\n"
     "- Be brief in your answers.\n"
     "- DO NOT USE your own general knowledge to generate answers.\n"

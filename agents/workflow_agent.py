@@ -14,7 +14,7 @@ from typing import Any, Mapping
 
 from agent_framework import Agent, AgentExecutor, WorkflowBuilder
 
-from agents.azure_clients import get_foundry_chat_client
+from agents.azure_clients import build_model_options, get_foundry_chat_client
 from agents.prompt_templates import NO_SOURCE_REFERENCES_RULE, render_prompt_template
 from agents.tools import get_weather, search_knowledge_base, get_current_time
 
@@ -74,21 +74,21 @@ def create_workflow_agent(parameters: Mapping[str, Any] | None = None) -> Agent:
         instructions=render_prompt_template(RESEARCHER_INSTRUCTIONS, parameters) + NO_SOURCE_REFERENCES_RULE,
         name="researcher",
         tools=[get_weather, search_knowledge_base, get_current_time],
-        default_options={"store": False},
+        default_options=build_model_options(),
     )
 
     analyst = Agent(
         client=client,
         instructions=render_prompt_template(ANALYST_INSTRUCTIONS, parameters) + NO_SOURCE_REFERENCES_RULE,
         name="analyst",
-        default_options={"store": False},
+        default_options=build_model_options(),
     )
 
     formatter = Agent(
         client=client,
         instructions=render_prompt_template(FORMATTER_INSTRUCTIONS, parameters) + NO_SOURCE_REFERENCES_RULE,
         name="formatter",
-        default_options={"store": False},
+        default_options=build_model_options(),
     )
 
     # --- Workflow wiring ---
